@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CFAR 恒虚警检测：CA 与 OS 的完整推导</title>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true
+  },
+  options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  :root {
+    --ink: #1a2233;
+    --sub: #4a5568;
+    --line: #d8dee9;
+    --bg: #ffffff;
+    --panel: #f5f7fa;
+    --accent: #1f4e79;
+    --accent2: #b7791f;
+    --ok: #276749;
+    --bad: #9b2c2c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.75;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 56px 80px;
+    font-size: 15.5px;
+  }
+  h1 { font-size: 30px; color: var(--accent); border-bottom: 3px solid var(--accent); padding-bottom: 14px; margin-bottom: 6px; }
+  h2 { font-size: 22px; color: var(--accent); margin-top: 48px; border-left: 5px solid var(--accent); padding-left: 12px; }
+  h3 { font-size: 18px; color: var(--accent); margin-top: 30px; }
+  h4 { font-size: 16px; color: var(--sub); margin-top: 22px; }
+  p, li { color: var(--ink); }
+  .lead { color: var(--sub); font-size: 16px; margin-bottom: 30px; }
+  .formula {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 20px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .formula .tag { color: var(--accent2); font-weight: 700; font-size: 13px; display: block; margin-bottom: 4px; }
+  .plain { font-family: "Consolas", "Courier New", monospace; font-size: 13.5px; color: var(--sub); }
+  table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: center; }
+  th { background: var(--panel); color: var(--accent); }
+  td.l { text-align: left; }
+  .note { background: #f0f6ff; border-left: 4px solid #3182ce; padding: 12px 18px; margin: 18px 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fffaf0; border-left: 4px solid var(--accent2); padding: 12px 18px; margin: 18px 0; border-radius: 0 6px 6px 0; }
+  .good { background: #f0fff4; border-left: 4px solid var(--ok); padding: 12px 18px; margin: 18px 0; border-radius: 0 6px 6px 0; }
+  .bad { background: #fff5f5; border-left: 4px solid var(--bad); padding: 12px 18px; margin: 18px 0; border-radius: 0 6px 6px 0; }
+  code { background: var(--panel); padding: 2px 5px; border-radius: 3px; font-size: 13.5px; color: #2c5282; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 28px; margin-bottom: 36px; }
+  .toc ol { margin: 6px 0; padding-left: 22px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .step { counter-increment: step; }
+  .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--sub); font-size: 13px; }
+  @media print {
+    body { padding: 0; font-size: 12pt; max-width: none; }
+    h2 { page-break-after: avoid; }
+    .formula, table { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<h1>CFAR 恒虚警检测：CA 与 OS 的完整推导</h1>
+<p class="lead">从噪声分布假设出发，一步步推出两种检测器的虚警概率与缩放系数 $\alpha$，并给出数值验证。配套代码：<code>proj1_cfar.m</code>、<code>cfar_alpha_verify.m</code>。</p>
+
+<div class="toc">
+<strong>目录</strong>
+<ol>
+  <li><a href="#s0">问题设定：CFAR 在做什么</a></li>
+  <li><a href="#s1">数学准备：三个工具</a></li>
+  <li><a href="#s2">CA-CFAR 的推导（有闭式解）</a></li>
+  <li><a href="#s3">OS-CFAR 的推导（无闭式解）</a></li>
+  <li><a href="#s4">一个流传很广的错误近似</a></li>
+  <li><a href="#s5">检测概率 Pd 的推导</a></li>
+  <li><a href="#s6">数值验证：理论 vs 蒙特卡洛</a></li>
+  <li><a href="#s7">与代码的逐行对应</a></li>
+  <li><a href="#s8">要点速查</a></li>
+</ol>
+</div>
+
+<h2 id="s0">1. 问题设定：CFAR 在做什么</h2>
+
+<p>距离谱上每个 bin 的功率记作 $X$。目标是判断某个 bin（CUT, cell under test）里有没有人体回波。难点是噪声/杂波功率未知且随距离变化，固定门限做不到恒定虚警，所以要从<b>邻近单元</b>估计本地噪声功率，再让门限随估计值浮动——这就是 Constant False Alarm Rate。</p>
+
+<div class="formula">
+<span class="tag">CFAR 检测器的一般结构</span>
+$$T = \alpha \cdot Z, \qquad \text{判决：} X \mathop{\gtrless}_{H_0}^{H_1} T$$
+<span class="plain">X = CUT 功率；Z = 由参考单元构造的杂波功率估计；α = 缩放因子（决定设计虚警率）；T = 自适应门限。</span>
+</div>
+
+<p>参考窗分两种排列：CUT 两侧各 $N/2$ 个单元（对称窗），中间隔 $G$ 个<b>保护单元</b>。保护单元不参与估计，因为目标经距离 FFT 后主瓣会泄漏到相邻 bin，若把它们算进参考窗，Z 被抬高，目标会被自己的能量"吃掉"。</p>
+
+<p><b>噪声模型（关键假设）</b>：距离维是复数 FFT，$X=|n|^2$，其中 $n$ 是复高斯噪声，因此 $X$ 服从<b>指数分布</b>（不是瑞利——瑞利是包络 $|n|$，功率 $|n|^2$ 才是指数）：</p>
+
+<div class="formula">
+<span class="tag">指数分布（均值 μ）</span>
+$$f_X(x)=\frac{1}{\mu}e^{-x/\mu},\quad F_X(x)=1-e^{-x/\mu},\quad x\ge 0,\qquad \mathbb{E}[X]=\mu$$
+<span class="plain">μ = 该距离 bin 的平均噪声功率。指数分布的方差恰好等于 μ²，这个"方差=均值平方"性质后面反复用。</span>
+</div>
+
+<p>两个假设：</p>
+<ul>
+  <li>$H_0$（无目标）：CUT $X\sim \text{Exp}(\mu)$，与参考单元独立同分布；</li>
+  <li>$H_1$（有目标）：CUT $X\sim \text{Exp}\big(\mu(1+\mathrm{SNR})\big)$，参考窗仍为纯噪声。</li>
+</ul>
+
+<p>设计目标：给定期望虚警率 $P_{fa}$，求出 $\alpha$，使得 $H_0$ 下 $P(X>\alpha Z)=P_{fa}$ 恒成立——与 $\mu$ 无关，这正是"恒虚警"的含义。</p>
+
+<h2 id="s1">2. 数学准备：三个工具</h2>
+
+<h3>2.1 指数分布的"尾积分"</h3>
+<p>若 $X\sim\text{Exp}(\mu)$，则对任意 $t\ge 0$：</p>
+<div class="formula">
+$$P(X>t)=\int_t^\infty \frac{1}{\mu}e^{-x/\mu}\,dx=e^{-t/\mu}$$
+<span class="plain">这条最常用：条件概率 $P(X>\alpha Z \mid Z=z)=e^{-\alpha z/\mu}$。</span>
+</div>
+
+<h3>2.2 Gamma 分布与指数和</h3>
+<p>$N$ 个独立同分布 $\text{Exp}(\mu)$ 之和服从 Gamma 分布：$S=\sum_{i=1}^N X_i \sim \Gamma(N,\mu)$（shape $N$，scale $\mu$）。它的矩母函数（MGF）是推导 CA 的核心：</p>
+<div class="formula">
+$$\mathbb{E}\big[e^{tS}\big]=\left(1-t\mu\right)^{-N},\qquad t<1/\mu$$
+<span class="plain">单个指数变量的 MGF 是 $(1-t\mu)^{-1}$，$N$ 个独立变量相乘即得。</span>
+</div>
+
+<h3>2.3 阶统计量与 Beta/Gamma 函数</h3>
+<p>把 $N$ 个参考单元从小到大排序：$Y_{(1)}\le Y_{(2)}\le\cdots\le Y_{(N)}$。第 $k$ 小者 $Y_{(k)}$ 的概率密度为：</p>
+<div class="formula">
+<span class="tag">第 k 阶统计量 PDF</span>
+$$f_{(k)}(z)=\frac{N!}{(k-1)!\,(N-k)!}\,\big[F(z)\big]^{k-1}\big[1-F(z)\big]^{N-k}f(z)$$
+<span class="plain">解释：要在 N 个样本中挑出第 k 小的那个落在 z，需有 k−1 个 ≤ z、N−k 个 &gt; z、1 个正好在 z，多项式系数 $N!/[(k-1)!(N-k)!]$ 数的是排列方式。</span>
+</div>
+<p>以及 Beta 函数与其关键恒等式（推导 OS 用）：</p>
+<div class="formula">
+$$B(p,q)=\int_0^1 u^{p-1}(1-u)^{q-1}\,du=\frac{\Gamma(p)\Gamma(q)}{\Gamma(p+q)},\qquad \Gamma(n)=(n-1)!\ \ (n\in\mathbb{N})$$
+</div>
+
+<h2 id="s2">3. CA-CFAR 的推导（有闭式解）</h2>
+
+<h3>3.1 结构与统计量</h3>
+<p>CA（Cell Averaging）把参考单元<b>算术平均</b>作为杂波估计：</p>
+<div class="formula">
+$$Z=\frac{1}{N}\sum_{i=1}^{N}Y_i,\qquad T=\alpha Z=\frac{\alpha}{N}\sum_{i=1}^{N}Y_i$$
+</div>
+
+<h3>3.2 虚警概率推导</h3>
+<p class="step"><b>第 1 步</b>　对 Z 取条件期望，用指数分布尾积分：</p>
+<div class="formula">
+$$P_{fa}=P(X>\alpha Z)=\mathbb{E}_Z\!\left[P(X>\alpha Z\mid Z)\right]=\mathbb{E}_Z\!\left[e^{-\alpha Z/\mu}\right]$$
+</div>
+
+<p class="step"><b>第 2 步</b>　代入 $Z=\frac{1}{N}\sum Y_i$，识别为 Gamma 变量在 $t=-\alpha/(N\mu)$ 处的 MGF：</p>
+<div class="formula">
+$$P_{fa}=\mathbb{E}\!\left[\exp\!\left(-\frac{\alpha}{N\mu}\sum_{i=1}^N Y_i\right)\right]
+=\left(1-\left(-\frac{\alpha}{N\mu}\right)\mu\right)^{-N}
+=\left(1+\frac{\alpha}{N}\right)^{-N}$$
+<span class="plain">注意 μ 被约掉了——这就是"恒虚警"的数学来源：Pfa 只取决于 α 和 N，与噪声功率 μ 无关。</span>
+</div>
+
+<p class="step"><b>第 3 步</b>　解出 α：</p>
+<div class="formula">
+<span class="tag">CA-CFAR 缩放因子（闭式解）</span>
+$$P_{fa}=\left(1+\frac{\alpha}{N}\right)^{-N}\ \Longrightarrow\ 1+\frac{\alpha}{N}=P_{fa}^{-1/N}\ \Longrightarrow\ \boxed{\alpha=N\left(P_{fa}^{-1/N}-1\right)}$$
+<span class="plain">对应代码：alpha = Nref*(Pfa^(-1/Nref) - 1)。</span>
+</div>
+
+<div class="good">
+<b>直觉校验</b>：$P_{fa}$ 越小 → $P_{fa}^{-1/N}$ 越大 → $\alpha$ 越大 → 门限越高 → 虚警越少，方向正确。$N$ 越大时同样的 $P_{fa}$ 需要更小的单门限倍数（因为平均估计更稳），也符合预期。代入 $N=16,\ P_{fa}=10^{-4}$：$\alpha=16(10^{4/16}-1)=12.4525$，与代码和实测完全一致。
+</div>
+
+<h3>3.3 CA 的适用条件与失效场景</h3>
+<p>上述推导要求参考窗内 $N$ 个单元<b>独立同分布</b>（均匀杂波）。两个典型失效：</p>
+<ul>
+  <li><b>多目标掩蔽</b>：参考窗内混入强目标，$Z$ 被抬高，门限虚高，旁边弱目标被漏检。proj1 场景B 中 bin 76 的强回波抬高了 bin 70 的参考窗，CA 漏掉 bin 70。</li>
+  <li><b>杂波边缘</b>：参考窗跨越强弱杂波交界（人体雷达常见——墙、家具边缘），$Z$ 严重偏离 CUT 处的真实杂波功率，边缘一侧虚警激增、另一侧漏检。</li>
+</ul>
+<p>改进型 GO-CA / SO-CA 分别取左右窗估计的较大/较小者，缓解边缘与多目标问题，但本质仍是平均，此处不展开。</p>
+
+<h2 id="s3">4. OS-CFAR 的推导（无闭式解）</h2>
+
+<h3>4.1 结构：用有序统计量代替均值</h3>
+<p>OS（Ordered Statistics）不对参考窗求平均，而是<b>排序后取第 k 个</b>：</p>
+<div class="formula">
+$$Z=Y_{(k)},\qquad k=\mathrm{round}(pN)\ \ (\text{常用 }p=0.75),\qquad T=\alpha\,Y_{(k)}$$
+<span class="plain">取 k 偏大（如 0.75N）是为了保守：即便参考窗内有少量强目标，它们只排在最顶端，不影响第 k 个值，因此抗多目标掩蔽能力强于 CA。</span>
+</div>
+
+<h3>4.2 虚警概率推导</h3>
+<p class="step"><b>第 1 步</b>　仍是对 $Y_{(k)}$ 取条件期望：</p>
+<div class="formula">
+$$P_{fa}=P\!\left(X>\alpha Y_{(k)}\right)=\mathbb{E}_{Y_{(k)}}\!\left[e^{-\alpha Y_{(k)}/\mu}\right]
+=\int_0^\infty e^{-\alpha z/\mu}\,f_{(k)}(z)\,dz$$
+</div>
+
+<p class="step"><b>第 2 步</b>　代入第 k 阶统计量 PDF，并作变量替换 $u=1-F(z)=e^{-z/\mu}$：</p>
+<div class="formula">
+<span class="plain">换元关系：$z=-\mu\ln u,\ \ dz=-\mu\,du/u,\ \ f(z)\,dz=(1/\mu)e^{-z/\mu}dz=-du,\ \ e^{-\alpha z/\mu}=u^{\alpha}$。<br>积分限 $z:0\to\infty$ 对应 $u:1\to0$。</span>
+$$P_{fa}=\frac{N!}{(k-1)!(N-k)!}\int_1^0 u^{\alpha}(1-u)^{k-1}u^{N-k}(-du)
+=\frac{N!}{(k-1)!(N-k)!}\int_0^1 u^{\alpha+N-k}(1-u)^{k-1}\,du$$
+</div>
+
+<p class="step"><b>第 3 步</b>　识别为 Beta 函数 $B(\alpha+N-k+1,\,k)$，再用 $\Gamma(k)=(k-1)!$ 化简：</p>
+<div class="formula">
+<span class="tag">OS-CFAR 精确虚警概率</span>
+$$P_{fa}=\frac{N!}{(k-1)!(N-k)!}\cdot\frac{\Gamma(\alpha+N-k+1)\Gamma(k)}{\Gamma(\alpha+N+1)}
+=\boxed{\frac{N!}{(N-k)!}\cdot\frac{\Gamma(\alpha+N-k+1)}{\Gamma(\alpha+N+1)}}$$
+</div>
+
+<h3>4.3 为什么 α 必须数值求解</h3>
+<p>CA 里 $\alpha$ 只在 $(1+\alpha/N)^{-N}$ 中线性出现，能代数解出。OS 里 $\alpha$ 出现在<b>两个 Gamma 函数的自变量</b> $\Gamma(\alpha+N-k+1)/\Gamma(\alpha+N+1)$ 中，无法整理成初等函数的显式解。工程做法：</p>
+<ul>
+  <li><b>二分法</b>（本项目采用）：$P_{fa}(\alpha)$ 关于 $\alpha$ 单调递减，在区间 $[0,\,10^4]$ 上二分 80~100 次即可收敛到机器精度；</li>
+  <li>牛顿时：需要 Gamma 的对数导数（digamma 函数），收敛快但实现复杂；</li>
+  <li>查表法：Rohling 原始论文给出预计算表，适合无浮点运算的硬件。</li>
+</ul>
+<p>数值计算必须用 <code>gammaln</code>（Γ 的对数）而非直接算 Γ——$N!$ 和 $\Gamma(\alpha+N+1)$ 轻易溢出双精度。代码中的实现：</p>
+<div class="formula">
+<span class="plain">log Pfa = gammaln(N+1) − gammaln(N−k+1) + gammaln(α+N−k+1) − gammaln(α+N+1)，再 exp 得 Pfa。</span>
+</div>
+
+<div class="note">
+<b>k 怎么选</b>：$k$ 越大，取的有序值越大，门限越高、越保守、抗多目标越强，但均匀噪声区的检测损失也越大。$k=N$（取最大值）时 OS 最抗掩蔽，$k$ 接近 $N/2$ 时性能趋近 CA 的稳健性但失去抗多目标优势。$k\approx 0.75N$ 是常用折中。
+</div>
+
+<h2 id="s4">5. 一个流传很广的错误近似</h2>
+
+<p>不少资料把 OS 的缩放因子近似写成 $\alpha\approx k\left(P_{fa}^{-1/k}-1\right)$——形式上是"把 CA 公式里的 N 换成 k"。这个近似<b>没有理论依据</b>：它相当于假设 $Y_{(k)}$ 的行为等同于 $k$ 个 iid 指数变量的某种平均，但第 k 阶统计量的分布比这复杂得多（正是第 4 节推出的 Gamma 比）。</p>
+
+<p>把它代入精确 $P_{fa}$ 公式，误差有多大？用 $N=16,\ k=12$ 实测：</p>
+
+<table>
+<thead><tr><th>设计 $P_{fa}$</th><th>精确 α（二分）</th><th>近似 α = k(Pfa^−1/k−1)</th><th>近似导致的实际 $P_{fa}$</th><th>偏差</th></tr></thead>
+<tbody>
+<tr><td>$10^{-2}$</td><td>4.4251</td><td>5.6136</td><td>3.67×10⁻³</td><td class="l">偏低约 2.7 倍</td></tr>
+<tr><td>$10^{-3}$</td><td>7.4214</td><td>9.3394</td><td>2.90×10⁻⁴</td><td class="l">偏低约 3.4 倍</td></tr>
+<tr><td>$10^{-4}$</td><td>11.0802</td><td>13.8532</td><td>2.50×10⁻⁵</td><td class="l">偏低约 4 倍</td></tr>
+</tbody>
+</table>
+
+<div class="bad">
+<b>结论</b>：近似 α 系统性偏大（Pfa=1e-4 时高估 25%），门限被抬高，实际虚警率比设计值低 4 倍——检测器变得过于保守，检测概率白白损失。本项目的 <code>os_alpha()</code> 用精确公式 + 二分，不用这个近似。要准确求 OS 的 α，用精确 Pfa 公式数值求解，别用近似式。
+</div>
+
+<h2 id="s5">6. 检测概率 Pd 的推导</h2>
+
+<p>虚警率定下 α 后，自然关心发现概率。$H_1$ 下 CUT 均值变为 $\mu(1+\mathrm{SNR})$，参考窗不变，所以只需把尾积分里的 $\mu$ 换成 $\mu(1+\mathrm{SNR})$。</p>
+
+<p><b>CA：</b>把第 3.2 节式中的 $\mu\to\mu(1+\mathrm{SNR})$：</p>
+<div class="formula">
+$$P_d^{CA}=\left(1+\frac{\alpha}{N(1+\mathrm{SNR})}\right)^{-N}$$
+</div>
+
+<p><b>OS：</b>同理，把精确 Pfa 公式里的 $\alpha$ 换成 $\alpha/(1+\mathrm{SNR})$（记 $\beta=\alpha/(1+\mathrm{SNR})$）：</p>
+<div class="formula">
+$$P_d^{OS}=\frac{N!}{(N-k)!}\cdot\frac{\Gamma(\beta+N-k+1)}{\Gamma(\beta+N+1)},\qquad \beta=\frac{\alpha}{1+\mathrm{SNR}}$$
+<span class="plain">OS 的 Pd 与 Pfa 公式完全同构，只是把 α 缩放了 1/(1+SNR)——这是有序统计量推导的一个漂亮副产品。</span>
+</div>
+
+<p>实测（SNR=10 dB，N=16，k=12）：</p>
+<table>
+<thead><tr><th>设计 $P_{fa}$</th><th>CA 理论 Pd</th><th>CA 实测</th><th>OS 理论 Pd</th><th>OS 实测</th></tr></thead>
+<tbody>
+<tr><td>$10^{-3}$</td><td>0.4646</td><td>0.4648</td><td>0.4313</td><td>0.4313</td></tr>
+<tr><td>$10^{-4}$</td><td>0.3349</td><td>0.3345</td><td>0.2916</td><td>0.2915</td></tr>
+</tbody>
+</table>
+<p>同一 $P_{fa}$ 下 CA 的 Pd 高于 OS——这就是 OS 抗多目标能力付出的代价：<b>均匀杂波区 CA 是检测损失最小的最优检测器，OS 有固定损失</b>。选型本质是"均匀区性能"换"复杂杂波稳健性"。</p>
+
+<h2 id="s6">7. 数值验证：理论 vs 蒙特卡洛</h2>
+
+<p>配套脚本 <code>cfar_alpha_verify.m</code> 用 $M=4\times10^5$ 次独立实验验证全部公式。$N=16,\ k=12,\ \mu=1$：</p>
+
+<table>
+<thead><tr>
+<th>设计 $P_{fa}$</th><th>CA α</th><th>CA 理论</th><th>CA 实测</th>
+<th>OS α</th><th>OS 理论</th><th>OS 实测</th>
+</tr></thead>
+<tbody>
+<tr><td>$10^{-2}$</td><td>5.3363</td><td>1.00×10⁻²</td><td>9.69×10⁻³</td><td>4.4251</td><td>1.00×10⁻²</td><td>9.74×10⁻³</td></tr>
+<tr><td>$10^{-3}$</td><td>8.6388</td><td>1.00×10⁻³</td><td>9.95×10⁻⁴</td><td>7.4214</td><td>1.00×10⁻³</td><td>9.90×10⁻⁴</td></tr>
+<tr><td>$10^{-4}$</td><td>12.4525</td><td>1.00×10⁻⁴</td><td>1.15×10⁻⁴</td><td>11.0802</td><td>1.00×10⁻⁴</td><td>1.02×10⁻⁴</td></tr>
+</tbody>
+</table>
+
+<p><b>α 速查表</b>（$N=16,\ k=12$，你调参时可直接用）：</p>
+<table>
+<thead><tr><th>$P_{fa}$</th><th>CA α</th><th>OS α（精确）</th><th>OS 近似（错）</th></tr></thead>
+<tbody>
+<tr><td>$10^{-2}$</td><td>5.3363</td><td>4.4251</td><td>5.6136</td></tr>
+<tr><td>$10^{-3}$</td><td>8.6388</td><td>7.4214</td><td>9.3394</td></tr>
+<tr><td>$10^{-4}$</td><td>12.4525</td><td>11.0802</td><td>13.8532</td></tr>
+<tr><td>$10^{-5}$</td><td>16.8564</td><td>15.5363</td><td>19.3219</td></tr>
+<tr><td>$10^{-6}$</td><td>21.9420</td><td>20.9542</td><td>25.9473</td></tr>
+</tbody>
+</table>
+<p class="plain">实测与理论在 3 位有效数字内吻合（$10^{-4}$ 处 CA 略高是 4e5 次采样的统计涨落，约 46 次虚警，相对标准差 ~15%，属正常）。</p>
+
+<h2 id="s7">8. 与代码的逐行对应</h2>
+
+<table>
+<thead><tr><th>文档公式</th><th>proj1_cfar.m 位置</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td class="l">$\alpha=N(P_{fa}^{-1/N}-1)$</td><td class="l"><code>ca_cfar()</code> 中<br><code>alpha = Nref*(Pfa^(-1/Nref)-1)</code></td><td class="l">闭式解，直接算</td></tr>
+<tr><td class="l">$P_{fa}=\frac{N!}{(N-k)!}\frac{\Gamma(\alpha+N-k+1)}{\Gamma(\alpha+N+1)}$</td><td class="l"><code>os_alpha()</code> 中<br><code>gammaln(N+1)-gammaln(N-k+1)+…</code></td><td class="l">对数域计算，避免溢出</td></tr>
+<tr><td class="l">二分求 α</td><td class="l"><code>os_alpha()</code> 的 for 循环</td><td class="l">$P_{fa}(\alpha)$ 单调递减，80 次收敛</td></tr>
+<tr><td class="l">$Z=\frac{1}{N}\sum Y_i$</td><td class="l"><code>mean(P(idx))</code></td><td class="l">CA 的参考窗平均</td></tr>
+<tr><td class="l">$Z=Y_{(k)}$</td><td class="l"><code>sort(P(idx))</code> 后取 <code>Z(k)</code></td><td class="l">OS 的第 k 小</td></tr>
+</tbody>
+</table>
+
+<h2 id="s8">9. 要点速查</h2>
+
+<div class="note">
+<b>Q1：CA-CFAR 的 α 怎么来的？</b><br>
+A：假设参考窗 iid 指数分布，$\sum Y_i\sim\Gamma(N,\mu)$，其 MGF 给出 $P_{fa}=(1+\alpha/N)^{-N}$，解出 $\alpha=N(P_{fa}^{-1/N}-1)$。关键是 μ 被约掉，所以虚警率与噪声功率无关。
+</div>
+
+<div class="note">
+<b>Q2：OS-CFAR 为什么没有闭式 α？</b><br>
+A：它的 $P_{fa}=\frac{N!}{(N-k)!}\frac{\Gamma(\alpha+N-k+1)}{\Gamma(\alpha+N+1)}$，α 在 Γ 函数内部，只能数值求根（二分/牛顿/查表）。要注意用 gammaln 防止溢出。
+</div>
+
+<div class="note">
+<b>Q3：CA 和 OS 怎么选？</b><br>
+A：均匀杂波区 CA 检测损失最小、性能最优；有邻近强目标或多目标时用 OS，因为它取第 k 个有序值，少数强值不会抬高门限，抗掩蔽能力强。代价是均匀区 Pd 略低（本例 10 dB 时 0.335 vs 0.292）。人体雷达在墙/家具边缘、多人场景多用 OS 或其变体。
+</div>
+
+<div class="note">
+<b>Q4：保护单元为什么必须有？</b><br>
+A：目标主瓣泄漏到相邻 bin，若它们进入参考窗，Z 被污染抬高，弱目标漏检。保护单元数 G 一般取 1~4，随窗函数主瓣宽度定。
+</div>
+
+<div class="warn">
+<b>Q5（陷阱）：OS 的 α 能不能用 k(Pfa^−1/k−1) 近似？</b><br>
+A：不能。该式没有理论依据，实测在 N=16、Pfa=1e-4 时把 α 从 11.08 高估到 13.85，实际虚警率掉到设计值的 1/4，白白损失检测概率。老老实实数值求解。
+</div>
+
+<div class="footer">
+配套文件：<code>proj1_cfar.m</code>（CA/OS 实现与场景仿真）、<code>cfar_alpha_verify.m</code>（本文档全部数值的复现脚本）、<code>radar_param.m</code>（统一参数）。<br>
+所有数值由 MATLAB R2025b2 实测生成，公式与代码逐行核对。推导中"指数分布"对应复高斯噪声的功率 $|n|^2$——这是距离谱 FFT 后的正确模型。
+</div>
+
+</body>
+</html>
